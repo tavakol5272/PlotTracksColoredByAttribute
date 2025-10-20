@@ -266,14 +266,14 @@ server <- function(input, output, session) {
     names(cols_base) <- levs
     
     # Map each to a base color
-    base_vec <- cols_base[as.character(segs$cat)]  # can be NA if cat is NA
+    base_vec <- cols_base[as.character(segs$cat)]  
     
     #normalize continuous to [0,1] 
     v_all <- segs$cont
     v_fin <- v_all[is.finite(v_all)]
     rng   <- if (length(v_fin)) range(v_fin) else c(0, 1)
     
-    seg_cols <- rep("#BDBDBD", nrow(segs))
+    seg_cols <- rep("lightgray", nrow(segs))
     
     # compute a shade
     ok <- !is.na(base_vec) & is.finite(v_all)
