@@ -61,23 +61,15 @@ make_segments_2attr <- function(tracks, cat_name, cont_name) {
   
   seg_cat  <- catv[same_track_next]
   v        <- conv
-  seg_cont <- (v[same_track_next] + v[which(same_track_next) + 1]) / 2
+  seg_cont <- rowMeans( cbind(v[same_track_next], v[which(same_track_next) + 1]), na.rm = TRUE)
+  seg_cont[is.nan(seg_cont)] <- NA_real_
+  
   seg_track <- id[which(same_track_next)]
   sf::st_sf(track = seg_track, cat = seg_cat, cont = seg_cont, geometry = segs[same_track_next])
 }
 
-## helper 3: selecting base map
-base_map_fun <- function(map, basemap) {
-  if (identical(basemap, "TopoMap")) {
-    addProviderTiles(map, "Esri.WorldTopoMap")
-  } else if (identical(basemap, "Aerial")) {
-    addProviderTiles(map, "Esri.WorldImagery")
-  } else {
-    addTiles(map)
-  }
-}
 
-# helper 5:  generate HCL colors
+# helper 3:  generate HCL colors
 color_generator <- function(pal, n, step = NULL) {
   if (n <= 0) return(character(0))
   m <- length(pal)
@@ -110,11 +102,6 @@ ui <- fluidPage(
                               choices = c("Single panel","Multipanel"),
                               selected = "Single panel", inline = TRUE),
                  
-                 h4("Base map"),
-                 radioButtons("basemap", NULL,
-                              choices  = c("OpenStreetMap", "TopoMap", "Aerial"),
-                              selected = "OpenStreetMap", inline = TRUE),
-                 hr(),
                  
                  h4("Attributes"),
                  fluidRow(
@@ -221,7 +208,7 @@ server <- function(input, output, session) {
       locked_settings(list(
         animals   = input$animals,
         panel_mode= input$panel_mode,
-        basemap   = input$basemap,
+        #basemap   = input$basemap,
         cat_attr  = input$cat_attr,
         cont_attr = input$cont_attr,
         cat_pal   = input$cat_pal,
@@ -238,7 +225,7 @@ server <- function(input, output, session) {
     locked_settings(list(
       animals   = input$animals,
       panel_mode= input$panel_mode,
-      basemap   = input$basemap,
+      #basemap   = input$basemap,
       cat_attr  = input$cat_attr,
       cont_attr = input$cont_attr,
       cat_pal   = input$cat_pal,
@@ -248,7 +235,7 @@ server <- function(input, output, session) {
     ))
   }, ignoreInit = TRUE)
   
-  # segments for locked selection (two attributes)
+  # segments for locked selection
   segs_all <- reactive({
     s  <- locked_settings()
     mv <- locked_mv()
@@ -258,13 +245,13 @@ server <- function(input, output, session) {
     segs
   })
   
-  # palette + transient colors for locked selection
+  # colors for locked selection
   pal_info <- reactive({
     s <- locked_settings()
     segs <- segs_all()
     req(s, segs)
     
-    # categorical base colors
+    #categorical 
     levs  <- sort(unique(stats::na.omit(as.character(segs$cat))))
     n     <- length(levs)
     pname <- if (is.null(s$cat_pal)) "Dark2" else s$cat_pal
@@ -278,30 +265,52 @@ server <- function(input, output, session) {
     cols_base <- if (n <= length(base)) base[seq_len(n)] else color_generator(base, n)
     names(cols_base) <- levs
     
-    base_vec <- cols_base[as.character(segs$cat)]
+    # Map each to a base color
+    base_vec <- cols_base[as.character(segs$cat)]  # can be NA if cat is NA
     
-    # normalize continuous to [0,1]
-    v <- segs$cont
-    rng <- range(v, na.rm = TRUE)
-    w <- if (!is.finite(rng[1]) || rng[1] == rng[2]) rep(0.5, length(v)) else (v - rng[1]) / (rng[2] - rng[1])
+    #normalize continuous to [0,1] 
+    v_all <- segs$cont
+    v_fin <- v_all[is.finite(v_all)]
+    rng   <- if (length(v_fin)) range(v_fin) else c(0, 1)
     
-    # shade: mix white and black in two steps
-    rgb_base <- t(grDevices::col2rgb(base_vec)) / 255
-    if (identical(s$cont_pal, "Light to Dark")) {
-      rgb1 <- (w * rgb_base) + ((1 - w) * 1)    
-      amt2 <- w * 0.6
-      rgb2 <- (1 - amt2) * rgb1 + amt2 * 0      
-    } else {  # dark to light
-      rgb1 <- (w * rgb_base) + ((1 - w) * 0)    
-      amt2 <- w * 0.6
-      rgb2 <- (1 - amt2) * rgb1 + amt2 * 1      
+    seg_cols <- rep("#BDBDBD", nrow(segs))
+    
+    # compute a shade
+    ok <- !is.na(base_vec) & is.finite(v_all)
+    if (any(ok)) {
+      v_ok <- v_all[ok]
+      # normalize
+      if (diff(rng) == 0) {
+        w <- rep(0.5, length(v_ok))
+      } else {
+        w <- (v_ok - rng[1]) / (rng[2] - rng[1])
+        w[w < 0] <- 0; w[w > 1] <- 1
+      }
+      
+      rgb_base <- t(grDevices::col2rgb(base_vec[ok])) / 255
+      
+      if (identical(s$cont_pal, "Light to Dark")) {
+        
+        rgb1 <- (w * rgb_base) + ((1 - w) * 1)    # mix with white
+        amt2 <- w * 0.6
+        rgb2 <- (1 - amt2) * rgb1 + amt2 * 0      # add some black
+      } else {  # Dark to Light
+        rgb1 <- (w * rgb_base) + ((1 - w) * 0)    # mix with black
+        amt2 <- w * 0.6
+        rgb2 <- (1 - amt2) * rgb1 + amt2 * 1      
+      }
+      
+      rgb2[rgb2 < 0] <- 0; rgb2[rgb2 > 1] <- 1
+      seg_cols[ok] <- grDevices::rgb(rgb2[,1], rgb2[,2], rgb2[,3])
     }
-    rgb2[rgb2 < 0] <- 0
-    rgb2[rgb2 > 1] <- 1
-    seg_cols <- grDevices::rgb(rgb2[,1], rgb2[,2], rgb2[,3])  #back to hex for Leaflet
     
-    list(seg_cols = seg_cols, legend_vals = cols_base, cont_range = rng)
+    list(
+      seg_cols    = seg_cols,     
+      legend_vals = cols_base,    
+      cont_range  = rng
+    )
   })
+  
   
   # build a leaflet map 
   leaflet_map <- function(track_id = NULL) {
@@ -323,10 +332,18 @@ server <- function(input, output, session) {
     
     bb <- as.vector(sf::st_bbox(segs))
     m <- leaflet(options = leafletOptions(minZoom = 2, preferCanvas = TRUE)) %>%
-      fitBounds(bb[1], bb[2], bb[3], bb[4])
-    m <- base_map_fun(m, s$basemap)
-    
-    m <- m %>%
+      
+      fitBounds(bb[1], bb[2], bb[3], bb[4]) %>%
+      addTiles(group = "OpenStreetMap") %>%
+      addProviderTiles("Esri.WorldTopoMap", group = "TopoMap") %>%
+      addProviderTiles("Esri.WorldImagery", group = "Aerial") %>%
+      addLayersControl(
+        baseGroups = c("OpenStreetMap", "TopoMap", "Aerial"),
+        position = "topleft",
+        options = layersControlOptions(collapsed = FALSE)
+      ) %>%
+      hideGroup("TopoMap") %>%
+      hideGroup("Aerial") %>%
       addScaleBar(position = "topleft") %>%
       addPolylines(data = segs, weight = s$linesize, opacity = s$linealpha,
                    color  = pcols, smoothFactor = 1)
@@ -334,13 +351,21 @@ server <- function(input, output, session) {
     
     
     # legend for continuous attribute
-    cont_legend <- sprintf( "<div style='background:transparent;padding:4px 6px 6px 6px;font-size:12px;opacity:.85;font-weight:700;'>
-     %s: %s  ",
+    cont_legend <- sprintf(
+      "<div style='background:transparent;padding:4px 6px 6px 6px;font-size:12px;opacity:.85;'>
+     <div style='font-weight:700;'>%s: %s</div>
+     <div style='margin-top:6px;display:flex;align-items:center;gap:6px;'>
+       <span style='display:inline-block;width:12px;height:12px;background:#BDBDBD;
+                    border:1px solid rgba(0,0,0,0.25);'></span>
+       <span>no data (NA)</span>
+     </div>
+   </div>",
       htmltools::htmlEscape(s$cont_attr),
       if (identical(s$cont_pal, "Light to Dark")) "Light to Dark" else "Dark to Light"
     )
     
-    m <- leaflet::addControl( m, html = cont_legend,  position = "topright"   )
+    m <- leaflet::addControl(m, html = cont_legend, position = "topright")
+    
     
     
     # legend for categorical attr 
