@@ -157,8 +157,8 @@ shinyModuleUserInterface <- function(id, label = NULL) {
                    h4("Tracks"),
                    checkboxGroupInput(ns("animals"), NULL, choices = NULL),
                    fluidRow(
-                     column(6, actionButton(ns("select_all_animals"), "Select All Animals", class = "btn-sm")),
-                     column(6, actionButton(ns("unselect_animals"), "Unselect All Animals", class = "btn-sm"))
+                     column(6, actionButton(ns("select_all_animals"), "Select All Tracks", class = "btn-sm")),
+                     column(6, actionButton(ns("unselect_animals"), "Unselect All Tracks", class = "btn-sm"))
                    ),
                    hr(),
                    h4("Attribute"),
@@ -653,20 +653,49 @@ shinyModule <- function(input, output, session, data) {
         m <- add_cat_legend(m, title = sp$title, labels = sp$legend_vals, colors = sp$cols, position = "topright")
       }
     } else {
-      m <- add_cat_legend(m, title = sp$title_cat, labels = names(sp$cat_legend),
-                          colors = unname(sp$cat_legend), position = "topright")
+      # categorical legend 
+      m <- add_cat_legend(m,title  = sp$title_cat,labels = names(sp$cat_legend),colors = unname(sp$cat_legend), position = "topright")
       
-      cont_legend <- sprintf(
-        "<div style='background:transparent;padding:4px 6px 6px 6px;font-size:12px;opacity:.85;'>
-           <div style='font-weight:700;'>%s</div>
-           <div style='margin-top:6px;display:flex;align-items:center;gap:6px;'>
-             <span style='display:inline-block;width:12px;height:12px;background:#BDBDBD;
-                          border:1px solid rgba(0,0,0,0.25);'></span>
-             <span>no data (NA)</span>
-           </div>
-         </div>", as.character(htmltools::htmlEscape(sp$title_cont))
+      # continuous grey scale legend
+      rng <- sp$cont_range
+      mn <- rng[1]; mx <- rng[2]
+      
+      ticks_all <- pretty(c(mn, mx), n = 5)
+      inner <- ticks_all[ticks_all > mn & ticks_all < mx]
+      if (length(inner) >= 3) {
+        idx <- round(seq(1, length(inner), length.out = 3))
+        inner3 <- inner[idx]
+      } else {
+        inner3 <- seq(mn, mx, length.out = 5)[2:4]
+      }
+      t1 <- inner3[1]; t2 <- inner3[2]; t3 <- inner3[3]
+      
+      # grey gradient
+      g1 <- if (identical(sp$title_cont, paste0(s$cont_attr_2, " (Light to Dark)"))) "white" else "black"
+      g2 <- if (identical(sp$title_cont, paste0(s$cont_attr_2, " (Light to Dark)"))) "black" else "white"
+      
+      grad2 <- tags$div(
+        style = "background:rgba(255,255,255,0.85);padding:6px 8px;border-radius:4px;font-size:11px;margin-top:6px;",
+        tags$div(htmltools::htmlEscape(sp$title_cont), style="font-weight:600;margin-bottom:4px;"),
+        tags$div(style = paste0(
+          "width:220px;height:12px;background:linear-gradient(to right,",
+          g1, ",", g2,
+          ");border:1px solid rgba(0,0,0,0.25);margin-bottom:6px;"
+        )),
+        tags$div(style="display:flex;justify-content:space-between;width:220px;opacity:0.9;",
+                 tags$span(sprintf('%g', mn)),
+                 tags$span(sprintf('%g', t1)),
+                 tags$span(sprintf('%g', t2)),
+                 tags$span(sprintf('%g', t3)),
+                 tags$span(sprintf('%g', mx))),
+        tags$div(style="display:flex;justify-content:space-between;width:220px;opacity:0.7;",
+                 tags$span("min"), tags$span(""), tags$span(""), tags$span(""), tags$span("max")),
+        tags$div(style="margin-top:6px;display:flex;align-items:center;gap:6px;opacity:0.85;",
+                 tags$span(style="display:inline-block;width:12px;height:12px;background:#BDBDBD;border:1px solid rgba(0,0,0,0.25);"),
+                 tags$span("no data (NA)"))
       )
-      m <- leaflet::addControl(m, html = cont_legend, position = "topright")
+      
+      m <- leaflet::addControl(m, html = as.character(grad2), position = "topright")
     }
     
     m
@@ -688,7 +717,7 @@ shinyModule <- function(input, output, session, data) {
     width <- 6
     cols <- lapply(seq_along(ids), function(i) {
       content <- tagList(
-        tags$h5(paste("Animal:", ids[i]),
+        tags$h5(paste("Track:", ids[i]),
                 style = "text-align: center; margin-top: 5px; margin-bottom: 5px;"),
         withSpinner(leafletOutput(ns(paste0("map_", ids[i])), height = "45vh"), type = 4, color = "blue", size = 0.9)
       )
@@ -720,7 +749,12 @@ shinyModule <- function(input, output, session, data) {
   
   #  Downloads part
   
-  #### html Downloads
+  #  HTML download
+  save_leaflet_html <- function(widget, html_path, selfcontained = TRUE) {
+    htmlwidgets::saveWidget(widget, file = html_path, selfcontained = selfcontained)
+    html_path
+  }
+  
   output$save_html <- downloadHandler(
     filename = function() {
       s <- locked_settings(); req(s)
@@ -733,23 +767,30 @@ shinyModule <- function(input, output, session, data) {
       
       s <- locked_settings(); req(s)
       
+      # Single panel: 
       if (!identical(s$panel_mode, "Multipanel")) {
-        htmlwidgets::saveWidget(leaflet_map(), file = file, selfcontained = TRUE)
+        save_leaflet_html(leaflet_map(), file, selfcontained = TRUE)
         return(invisible())
       }
       
-      ids <- s$animals; req(length(ids) > 0)
+      # Multipanel: 
       td <- tempfile("tracks_html_"); dir.create(td)
-      for (id in ids) {
+      for (id in s$animals) {
         out <- file.path(td, paste0(id, "_", Sys.Date(), ".html"))
-        htmlwidgets::saveWidget(leaflet_map(track_id = id), file = out, selfcontained = TRUE, libdir = NULL)
+        save_leaflet_html(leaflet_map(track_id = id), out, selfcontained = TRUE)
       }
-      files <- list.files(td, pattern = "\\.html$", recursive = FALSE)
-      zip::zipr(zipfile = file, files = files, root = td)
+      zip::zipr(zipfile = file, files = list.files(td, full.names = TRUE))
     }
   )
   
-  #### PNG Downloads
+  # PNG download
+  save_leaflet_png <- function(widget, png_path, vwidth = 1400L, vheight = 900L, delay = 2) {
+    html_tmp <- tempfile(fileext = ".html")
+    save_leaflet_html(widget, html_tmp, selfcontained = TRUE)
+    webshot2::webshot(as_file_url(html_tmp), png_path,vwidth = vwidth, vheight = vheight, cliprect = "viewport", delay = delay)
+    png_path
+  }
+  
   output$save_png <- downloadHandler(
     filename = function() {
       s <- locked_settings(); req(s)
@@ -762,27 +803,20 @@ shinyModule <- function(input, output, session, data) {
       
       s <- locked_settings(); req(s)
       
+      # Single panel:
       if (!identical(s$panel_mode, "Multipanel")) {
-        tf  <- tempfile(fileext = ".html")
-        htmlwidgets::saveWidget(leaflet_map(), tf, selfcontained = TRUE)
-        url <- if (.Platform$OS.type == "windows")
-          paste0("file:///", gsub("\\\\", "/", normalizePath(tf))) else tf
-        webshot2::webshot(url, file, vwidth = 1400, vheight = 900, delay = 1)
+        save_leaflet_png(leaflet_map(), file)
+        shiny::validate(shiny::need(file.exists(file), "PNG export failed."))
         return(invisible())
       }
       
-      ids <- s$animals; req(length(ids) > 0)
+      # Multipanel:
       td <- tempfile("tracks_png_"); dir.create(td)
-      for (id in ids) {
-        tf  <- tempfile(fileext = ".html")
-        htmlwidgets::saveWidget(leaflet_map(track_id = id), tf, selfcontained = TRUE)
-        url <- if (.Platform$OS.type == "windows")
-          paste0("file:///", gsub("\\\\", "/", normalizePath(tf))) else tf
+      for (id in s$animals) {
         out <- file.path(td, paste0(id, "_", Sys.Date(), ".png"))
-        webshot2::webshot(url, out, vwidth = 1400, vheight = 900, delay = 1)
+        save_leaflet_png(leaflet_map(track_id = id), out)
       }
-      files <- list.files(td, recursive = FALSE)
-      zip::zipr(zipfile = file, files = files, root = td)
+      zip::zipr(zipfile = file, files = list.files(td, full.names = TRUE))
     }
   )
   
