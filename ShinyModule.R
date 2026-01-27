@@ -258,16 +258,24 @@ shinyModule <- function(input, output, session, data) {
   onRestored_safe <- if (exists("onRestored", where = asNamespace("shiny"), inherits = FALSE)) shiny::onRestored else function(fun) invisible(NULL)
   
   #bookmark read
-  bookmark_file <- "shiny_bookmarks/latest/input.rds"
+  # bookmark_file <- "shiny_bookmarks/latest/input.rds"
+  # bk <- reactiveVal(NULL)
+  # observe({
+  #   if (is.null(bk()) && file.exists(bookmark_file)) {
+  #     bk(readRDS(bookmark_file))
+  #   }
+  # })
+  
   bk <- reactiveVal(NULL)
+  bookmark_rds_path <- get("bookmarkRdsTargetPath", inherits = TRUE)
   observe({
-    if (is.null(bk()) && file.exists(bookmark_file)) {
-      bk(readRDS(bookmark_file))
-    }
-  })
+    if (is.null(bk()) && file.exists(bookmark_rds_path)) {
+      bk(readRDS(bookmark_rds_path))  }  })
+  
   
   # current data (WGS84 + drop NA columns)
-  current <- reactiveVal({
+  current <- reactiveVal(NULL)
+  current({
     mv <- data
     if (!sf::st_is_longlat(mv)) mv <- sf::st_transform(mv, 4326)
     
