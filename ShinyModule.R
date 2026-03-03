@@ -1,3 +1,4 @@
+##new version
 library(shiny)
 library(move2)
 library(sf)
@@ -112,30 +113,10 @@ color_generator <- function(pal, n, step = NULL) {
 }
 
 ## helper 5: legend for categorical attributes
-add_cat_legend <- function(map, title, labels, colors, position = "topright") {
+add_cat_legend <- function(map, title, labels, colors, position = "topright", group = "Categorical_Legend") {
   stopifnot(length(labels) == length(colors))
-  rows <- paste0(
-    mapply(function(col, lab) {
-      sprintf(
-        "<div style='display:flex;align-items:center;margin:2px 0;'>
-           <span style='display:inline-block;width:14px;height:14px;background:%s;
-                        border:1px solid rgba(0,0,0,0.25);margin-right:6px;'></span>
-           <span>%s</span>
-         </div>",
-        col, as.character(htmltools::htmlEscape(lab))
-      )
-    }, colors, labels),
-    collapse = ""
-  )
-  box <- sprintf(
-    "<div style='background:transparent;padding:6px 8px;border-radius:1px;font-size:11px;'>
-       <div style='font-weight:600;margin-bottom:4px;'>%s</div>%s
-     </div>",
-    as.character(htmltools::htmlEscape(title)), rows
-  )
-  leaflet::addControl(map, html = box, position = position)
+  leaflet::addLegend( map,position = position,colors= colors,labels= labels,title = title, opacity  = 1, group= group)
 }
-
 # helper 6: shade a base color by weight- for cont in option2
 shade_hex <- function(base_hex, w, light_to_dark = TRUE) {
   if (!length(base_hex)) return(character(0))
@@ -258,24 +239,16 @@ shinyModule <- function(input, output, session, data) {
   onRestored_safe <- if (exists("onRestored", where = asNamespace("shiny"), inherits = FALSE)) shiny::onRestored else function(fun) invisible(NULL)
   
   #bookmark read
-  # bookmark_file <- "shiny_bookmarks/latest/input.rds"
-  # bk <- reactiveVal(NULL)
-  # observe({
-  #   if (is.null(bk()) && file.exists(bookmark_file)) {
-  #     bk(readRDS(bookmark_file))
-  #   }
-  # })
-  
+  bookmark_file <- "shiny_bookmarks/latest/input.rds"
   bk <- reactiveVal(NULL)
-  bookmark_rds_path <- get("bookmarkRdsTargetPath", inherits = TRUE)
   observe({
-    if (is.null(bk()) && file.exists(bookmark_rds_path)) {
-      bk(readRDS(bookmark_rds_path))  }  })
-  
+    if (is.null(bk()) && file.exists(bookmark_file)) {
+      bk(readRDS(bookmark_file))
+    }
+  })
   
   # current data (WGS84 + drop NA columns)
-  current <- reactiveVal(NULL)
-  current({
+  current <- reactiveVal({
     mv <- data
     if (!sf::st_is_longlat(mv)) mv <- sf::st_transform(mv, 4326)
     
@@ -743,13 +716,32 @@ shinyModule <- function(input, output, session, data) {
     }
     
     bb <- as.vector(sf::st_bbox(dseg))
+    cx <- (bb[1] + bb[3]) / 2
+    cy <- (bb[2] + bb[4]) / 2
+    ###########
+    overlay_legend <- if (sp$mode == 1) {
+      if (sp$is_cont) "Continious_Legend" else "Categorical_Legend"
+    } else {
+      c("Categorical_Legend", "Continious_Legend")
+    }
+    #############################
+    
+    
     m <- leaflet(options = leafletOptions(minZoom = 2, preferCanvas = TRUE)) %>%
       fitBounds(bb[1], bb[2], bb[3], bb[4]) %>%
       addTiles(group = "OpenStreetMap") %>%
       addProviderTiles("Esri.WorldTopoMap", group = "TopoMap") %>%
       addProviderTiles("Esri.WorldImagery", group = "Aerial") %>%
+      addCircleMarkers(
+        lng = cx, lat = cy,
+        radius = 1, stroke = FALSE,
+        opacity = 0, fillOpacity = 0,
+        group = "Continious_Legend",
+        options = pathOptions(interactive = FALSE)
+      ) %>%
       addLayersControl(
         baseGroups = c("OpenStreetMap", "TopoMap", "Aerial"),
+        overlayGroups = overlay_legend,
         position = "topleft",
         options = layersControlOptions(collapsed = FALSE)
       ) %>%
@@ -784,6 +776,7 @@ shinyModule <- function(input, output, session, data) {
         title_txt <- if (!is.null(unit_str) && nzchar(unit_str)) paste0(sp$title, " (", unit_str, ")") else sp$title
         
         grad <- tags$div(
+          class = "continious-legend",
           style = "background:rgba(255,255,255,0.85);padding:6px 8px;border-radius:4px;font-size:11px;",
           tags$div(htmlEscape(title_txt), style="font-weight:600;margin-bottom:4px;"),
           tags$div(style = paste0(
@@ -805,13 +798,13 @@ shinyModule <- function(input, output, session, data) {
         )
         m <- leaflet::addControl(m, html = as.character(grad), position = "topright")
       } else {
-        m <- add_cat_legend(m, title = sp$title, labels = sp$legend_vals, colors = sp$cols, position = "topright")
+        m <- add_cat_legend(m, title = sp$title, labels = sp$legend_vals, colors = sp$cols, position = "topright",group = "Categorical_Legend" )
       }
     } else {
       m <- add_cat_legend(m, title = sp$title_cat,
                           labels = names(sp$cat_legend),
                           colors = unname(sp$cat_legend),
-                          position = "topright")
+                          position = "topright", group ="Categorical_Legend")
       
       rng <- sp$cont_range
       mn <- rng[1]; mx <- rng[2]
@@ -830,7 +823,8 @@ shinyModule <- function(input, output, session, data) {
       g2 <- if (identical(sp$title_cont, paste0(s$cont_attr_2, " (Light to Dark)"))) "black" else "white"
       
       grad2 <- tags$div(
-        style = "background:rgba(255,255,255,0.85);padding:6px 8px;border-radius:4px;font-size:11px;margin-top:6px;",
+        class = "continious-legend",
+        style = "background:rgba(255,255,255,0.85);padding:6px 8px;border-radius:4px;font-size:11px;",
         tags$div(htmltools::htmlEscape(sp$title_cont), style="font-weight:600;margin-bottom:4px;"),
         tags$div(style = paste0(
           "width:220px;height:12px;background:linear-gradient(to right,",
@@ -851,7 +845,17 @@ shinyModule <- function(input, output, session, data) {
       )
       m <- leaflet::addControl(m, html = as.character(grad2), position = "topright")
     }
-    
+      m <- htmlwidgets::onRender(m, "
+              function(el){
+                var map = this;
+                function set(on){
+                  el.querySelectorAll('.continious-legend').forEach(n => n.style.display = on ? '' : 'none');
+                }
+                set(true);
+                map.on('overlayadd',    e => { if(e.name === 'Continious_Legend') set(true);  });
+                map.on('overlayremove', e => { if(e.name === 'Continious_Legend') set(false); });
+              }
+              ")
     m
   }
   
