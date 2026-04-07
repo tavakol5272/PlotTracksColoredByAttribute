@@ -1,4 +1,5 @@
 {
+  "version": "1.2",
   "settings":[],
   "dependencies": {
     "R": [
@@ -45,11 +46,12 @@
         "name": "shinybusy"
       },
       {
-        "name": "grDevices"
+        "name": "colorspace"
       },
       {
-        "name": "colorspace"
+        "name": "units"
       }
+      
       
     ]
   },
