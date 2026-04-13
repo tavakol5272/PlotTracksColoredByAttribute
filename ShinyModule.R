@@ -345,8 +345,17 @@ shinyModule <- function(input, output, session, data) {
       filter(n() >= 2) %>%
       ungroup()
   })
+  ########
+  applied_animals <- reactiveVal(NULL)
+  init_applied <- reactiveVal(FALSE)
   
-
+  observeEvent(input$animals, {
+    req(!is.null(input$animals))
+    applied_animals(as.character(input$animals))
+    init_applied(TRUE)
+  }, ignoreInit = FALSE)
+  ####
+  
   #attribute choices and classification
   attr_info_all <- reactive({ split_attr_choices(mv_all(), threshold = 12)  })
   
@@ -399,9 +408,13 @@ shinyModule <- function(input, output, session, data) {
   }, ignoreInit = TRUE)
   
   mv_sel <- reactive({
+    req(init_applied())
+    
     mv <- mv_all()
-    sel <- input$animals
+    sel <- applied_animals()
+    
     if (is.null(sel) || length(sel) == 0) return(mv[0, ])
+    
     mv[as.character(mt_track_id(mv)) %in% sel, ] %>%
       arrange(mt_track_id(), mt_time())
   })
@@ -443,7 +456,7 @@ shinyModule <- function(input, output, session, data) {
     }
     
     list(
-      animals     = input$animals,
+      animals     = applied_animals() %||% input$animals,
       panel_mode  = input$panel_mode,
       attr_mode   = input$attr_mode,
       attr_1      = input$attr_1,
@@ -483,6 +496,7 @@ shinyModule <- function(input, output, session, data) {
   #  initialize once from restored input values
   observe({
     if (isTRUE(init_done())) return()
+    req(init_applied())
     
     mv <- mv_sel()
     if (nrow(mv) == 0) return()
@@ -864,7 +878,13 @@ shinyModule <- function(input, output, session, data) {
   
   ################## JSON-friendly hidden inputs#########################
  
-  observe({ updateTextInput(session,"animals_json", value = paste(input$animals %||% character(0), collapse = ",")  ) })
+  observeEvent(input$animals, {
+    updateTextInput(
+      session,
+      "animals_json",
+      value = paste(input$animals %||% character(0), collapse = ",")
+    )
+  }, ignoreInit = TRUE)
   observe({ updateTextInput(session, "attr_1_json", value = input$attr_1 %||% "")  })
   observe({updateTextInput(session, "cat_attr_2_json", value = input$cat_attr_2 %||% "")})
   observe({ updateTextInput(session, "cont_attr_2_json", value = input$cont_attr_2 %||% "") })
