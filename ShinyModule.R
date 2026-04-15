@@ -546,11 +546,14 @@ shinyModule <- function(input, output, session, data) {
       if (is_cont) {
         low  <- if (is.null(s$col_low_1))  "yellow" else s$col_low_1
         high <- if (is.null(s$col_high_1)) "blue"   else s$col_high_1
-        orig_vals <- sf::st_drop_geometry(mv0)[[s$attr_1]]
+        
+        mv_full <- as_event(data, s$attr_1)
+        orig_vals <- sf::st_drop_geometry(mv_full)[[s$attr_1]]
         all_vals  <- if (inherits(orig_vals, "units")) units::drop_units(orig_vals) else orig_vals
         all_vals  <- as.numeric(all_vals)
         all_vals  <- all_vals[is.finite(all_vals)]
         rng       <- if (length(all_vals)) range(all_vals) else c(0, 1)
+        
         pal <- colorNumeric(colorRampPalette(c(low, high))(256), domain = rng, na.color = NA)
         
         list(mode = 1, segs = segs, is_cont = TRUE, pal = pal, legend_vals = rng, title = s$attr_1)
@@ -605,33 +608,48 @@ shinyModule <- function(input, output, session, data) {
   ##Add columns color hex and legend in the returned data
   mv_with_colors <- reactive({
     s  <- locked_settings()
-    mv <- locked_mv()
     sp <- segs_and_pal()
-    req(s, mv, sp)
+    req(s, sp)
     
-    #option 1
+    mv <- data   # full original input data
+    
+    # option 1
     if (sp$mode == 1) {
       mv_use <- as_event(mv, s$attr_1)
       vals0  <- sf::st_drop_geometry(mv_use)[[s$attr_1]]
       numv   <- if (inherits(vals0, "units")) units::drop_units(vals0) else vals0
-      hex    <- if (sp$is_cont) sp$pal(as.numeric(numv)) else sp$pal(as.character(vals0))
+      
+      hex <- if (sp$is_cont) {
+        sp$pal(as.numeric(numv))
+      } else {
+        sp$pal(as.character(vals0))
+      }
+      
       mv$color_hex <- as.character(hex)
       cname <- paste0("color_legend_", s$attr_1)
       mv[[cname]] <- vals0
       return(mv)
-    } else { #option2
+      
+    } else { # option 2
       mv02 <- as_event(mv, c(s$cat_attr_2, s$cont_attr_2))
-      cat_vals  <- sf::st_drop_geometry(mv02)[[s$cat_attr_2]]
-      cont_vals <- as.numeric(sf::st_drop_geometry(mv02)[[s$cont_attr_2]])
-      base_vec  <- sp$cat_legend[as.character(cat_vals)]
-      rng       <- sp$cont_range
+      dd   <- sf::st_drop_geometry(mv02)
+      
+      cat_vals  <- dd[[s$cat_attr_2]]
+      cont_raw  <- dd[[s$cont_attr_2]]
+      cont_vals <- if (inherits(cont_raw, "units")) units::drop_units(cont_raw) else as.numeric(cont_raw)
+      
+      base_vec <- sp$cat_legend[as.character(cat_vals)]
+      rng      <- sp$cont_range
       
       w <- if (isTRUE(is.finite(diff(rng))) && diff(rng) != 0) {
         pmin(1, pmax(0, (cont_vals - rng[1]) / (rng[2] - rng[1])))
-      } else rep(0.5, length(cont_vals))
+      } else {
+        rep(0.5, length(cont_vals))
+      }
       
       hex <- rep("lightgray", length(base_vec))
       ok  <- !is.na(base_vec) & is.finite(cont_vals)
+      
       if (any(ok)) {
         hex[ok] <- shade_hex(
           base_hex      = base_vec[ok],
@@ -646,17 +664,20 @@ shinyModule <- function(input, output, session, data) {
       cat_str  <- ifelse(is.na(cat_vals), "NA", as.character(cat_vals))
       cont_str <- ifelse(is.finite(cont_vals), sprintf("%g", cont_vals), "NA")
       mv[[combo_colname]] <- paste0(cat_str, "-", cont_str)
+      
       return(mv)
     }
   })
   
   #Update the returned output data
+  # Update the returned output data
   observe({
-    req(locked_mv(), locked_settings())
+    req(locked_settings())
+    
     if (isTRUE(locked_attach())) {
-      current(mv_with_colors())
+      current(mv_with_colors())   # full original data + color columns
     } else {
-      current(locked_mv())
+      current(data)               # full original data
     }
   })
   
