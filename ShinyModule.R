@@ -174,7 +174,7 @@ get_attr_choices <- function(mv) {
   sort(unique(c(event_choices, track_choices)))
 }
 
-# helper 9: split attributes into all / cat / cont without converting all track attrs
+# helper 9: split attributes into all,cat,cont without converting all track attrs
 split_attr_choices <- function(mv, threshold = 12) {
   all_names <- get_attr_choices(mv)
   if (!length(all_names)) {
@@ -332,6 +332,12 @@ shinyModule <- function(input, output, session, data) {
   })
   
   current <- reactiveVal(NULL)
+  
+  
+  if (!is.null(data) && nrow(data) > 0) {
+    current(data)
+  }
+  
   locked_settings <- reactiveVal(NULL)
   locked_mv       <- reactiveVal(NULL)
   locked_attach   <- reactiveVal(FALSE)
@@ -611,7 +617,7 @@ shinyModule <- function(input, output, session, data) {
     sp <- segs_and_pal()
     req(s, sp)
     
-    mv <- data   # full original input data
+    mv <- data   
     
     # option 1
     if (sp$mode == 1) {
@@ -669,15 +675,15 @@ shinyModule <- function(input, output, session, data) {
     }
   })
   
-  #Update the returned output data
+  
   # Update the returned output data
   observe({
     req(locked_settings())
     
     if (isTRUE(locked_attach())) {
-      current(mv_with_colors())   # full original data + color columns
+      current(mv_with_colors())   
     } else {
-      current(data)               # full original data
+      current(data)               
     }
   })
   
